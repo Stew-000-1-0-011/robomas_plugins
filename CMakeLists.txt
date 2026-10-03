@@ -1,7 +1,10 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.20)
 project(robomas_plugins)
 
-set(CMAKE_CXX_STANDARD 17)
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 26)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -16,9 +19,9 @@ find_package(rclcpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
-find_package(Boost REQUIRED COMPONENTS thread)
-
-include_directories(include ${Boost_INCLUDE_DIRS})
+# Boost.Asio / Boost.Bind are header-only; Boost.System is header-only since 1.69.
+find_package(Boost CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Frame.msg"
@@ -35,12 +38,19 @@ rosidl_get_typesupport_target(cpp_typesupport_target
 add_library(robomas_bridge SHARED
   src/robomas_bridge.cpp)
 
-target_link_libraries(robomas_bridge "${cpp_typesupport_target}")
+target_include_directories(robomas_bridge PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 
-ament_target_dependencies(robomas_bridge
-  rclcpp
-  rclcpp_components
-  std_msgs
+# ament_target_dependencies() is deprecated since Kilted; link imported targets directly.
+target_link_libraries(robomas_bridge
+  "${cpp_typesupport_target}"
+  rclcpp::rclcpp
+  rclcpp_components::component
+  ${std_msgs_TARGETS}
+  Boost::headers
+  Threads::Threads
 )
 
 rclcpp_components_register_nodes(robomas_bridge "robomas_bridge::RobomasBridge")
