@@ -1,0 +1,6 @@
+# Make the current position of a motor in position control (mode 2) its new zero.
+# motor: 1..8, the same number as the robomas_target<motor> topic.
+uint8 motor
+---
+bool success
+string message

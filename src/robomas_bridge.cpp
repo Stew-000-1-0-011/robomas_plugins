@@ -17,6 +17,7 @@ namespace robomas_bridge
         robomas_target5_ = this->create_subscription<robomas_plugins::msg::RobomasTarget>("robomas_target6", 10, std::bind(&RobomasBridge::robomasCallback6, this, _1));
         robomas_target6_ = this->create_subscription<robomas_plugins::msg::RobomasTarget>("robomas_target7", 10, std::bind(&RobomasBridge::robomasCallback7, this, _1));
         robomas_target7_ = this->create_subscription<robomas_plugins::msg::RobomasTarget>("robomas_target8", 10, std::bind(&RobomasBridge::robomasCallback8, this, _1));
+        zero_position_srv_ = this->create_service<robomas_plugins::srv::ZeroPosition>("robomas_zero_position", std::bind(&RobomasBridge::zeroPosition, this, _1, _2));
 
         // initalize asio members
         io_context_ = std::make_shared<boost::asio::io_context>();
@@ -47,7 +48,57 @@ namespace robomas_bridge
         if (!is_active_)
             return;
 
+        if (msg->motor < last_frames_.size())
+        {
+            std::lock_guard<std::mutex> lock(last_frames_mutex_);
+            last_frames_[msg->motor] = *msg;
+        }
         asyncWrite(msg);
+    }
+
+    // The board has no command to set the origin. It takes the position at which position control was enabled
+    // as zero, so disable the motor and enable it again with the same settings, then send target 0 (= stay here).
+    // The caller must switch its own targets to the new origin: an old target sent after this moves the motor by that much.
+    void RobomasBridge::zeroPosition(const std::shared_ptr<robomas_plugins::srv::ZeroPosition::Request> request,
+                                     std::shared_ptr<robomas_plugins::srv::ZeroPosition::Response> response)
+    {
+        if (request->motor < 1 || request->motor > last_frames_.size())
+        {
+            response->success = false;
+            response->message = "motor must be 1..8";
+            return;
+        }
+        if (!is_active_)
+        {
+            response->success = false;
+            response->message = "USB-CAN is not connected";
+            return;
+        }
+
+        const std::uint8_t index = request->motor - 1;
+        std::optional<robomas_plugins::msg::RobomasFrame> frame;
+        {
+            std::lock_guard<std::mutex> lock(last_frames_mutex_);
+            frame = last_frames_[index];
+        }
+        if (!frame || frame->mode != 2)
+        {
+            response->success = false;
+            response->message = "motor " + std::to_string(request->motor) + " is not in position control (mode 2)";
+            return;
+        }
+
+        auto disable = std::make_shared<robomas_plugins::msg::RobomasFrame>(*frame);
+        disable->mode = 0;
+        asyncWrite(disable);
+        asyncWrite(std::make_shared<robomas_plugins::msg::RobomasFrame>(*frame));
+        auto target = std::make_shared<robomas_plugins::msg::RobomasTarget>();
+        target->target = 0.0f;
+        asyncWrite(target, 0x08 | index);
+
+        RCLCPP_INFO(get_logger(), "motor %u: zeroed at the current position", request->motor);
+        response->success = true;
+        response->message = "zeroed";
     }
 
     void RobomasBridge::robomasCallback1(const robomas_plugins::msg::RobomasTarget::SharedPtr msg)
@@ -241,6 +292,8 @@ namespace robomas_bridge
             raw_data[2] = robomasFrame->temp;
             switch (robomasFrame->mode)
             {
+            case 0: // disable: no gains
+              break;
             case 1:
               std::memcpy(raw_data.data() + 3, &(robomasFrame->velkp), sizeof(float));
               std::memcpy(raw_data.data() + 7, &(robomasFrame->velki), sizeof(float));

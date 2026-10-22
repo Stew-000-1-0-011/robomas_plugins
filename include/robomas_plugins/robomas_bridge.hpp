@@ -1,8 +1,11 @@
 #pragma once
 
+#include <array>
 #include <cstring>
 #include <chrono>
 #include <future>
+#include <mutex>
+#include <optional>
 #include <vector>
 
 #include "robomas_bridge.hpp"
@@ -16,6 +19,7 @@
 #include "robomas_plugins/msg/frame.hpp"
 #include "robomas_plugins/msg/robomas_frame.hpp"
 #include "robomas_plugins/msg/robomas_target.hpp"
+#include "robomas_plugins/srv/zero_position.hpp"
 using namespace std::chrono_literals;
 using namespace std::placeholders;
 
@@ -69,6 +73,11 @@ namespace robomas_bridge
         rclcpp::Subscription<robomas_plugins::msg::RobomasTarget>::SharedPtr robomas_target5_;
         rclcpp::Subscription<robomas_plugins::msg::RobomasTarget>::SharedPtr robomas_target6_;
         rclcpp::Subscription<robomas_plugins::msg::RobomasTarget>::SharedPtr robomas_target7_;
+        rclcpp::Service<robomas_plugins::srv::ZeroPosition>::SharedPtr zero_position_srv_;
+
+        // the last RobomasFrame sent to each motor (index: RobomasFrame.motor, 0..7). zeroPosition() resends it.
+        std::array<std::optional<robomas_plugins::msg::RobomasFrame>, 8> last_frames_;
+        std::mutex last_frames_mutex_;
 
         void canTxCallback(const robomas_plugins::msg::Frame::SharedPtr msg);
         void robomasCallback(const robomas_plugins::msg::RobomasFrame::SharedPtr msg);
@@ -80,6 +89,8 @@ namespace robomas_bridge
         void robomasCallback6(const robomas_plugins::msg::RobomasTarget::SharedPtr msg);
         void robomasCallback7(const robomas_plugins::msg::RobomasTarget::SharedPtr msg);
         void robomasCallback8(const robomas_plugins::msg::RobomasTarget::SharedPtr msg);
+        void zeroPosition(const std::shared_ptr<robomas_plugins::srv::ZeroPosition::Request> request,
+                          std::shared_ptr<robomas_plugins::srv::ZeroPosition::Response> response);
 
         const int initialize_timeout_ = 1000; // ms
         // port open and setting.
